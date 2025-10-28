@@ -18,7 +18,6 @@
  */
 #include "CONFIG.h"
 #include "devinfoservice.h"
-#include "gattprofile.h"
 #include "peripheral.h"
 
 /*********************************************************************
@@ -29,8 +28,6 @@
  * CONSTANTS
  */
 
-// How often to perform periodic event
-#define SBP_PERIODIC_EVT_PERIOD              1600
 
 // How often to perform read rssi event
 #define SBP_READ_RSSI_EVT_PERIOD             3200
@@ -120,23 +117,7 @@ static uint8_t scanRspData[] = {
     0 // 0dBm
 };
 
-// GAP - Advertisement data (max size = 31 bytes, though this is
-// best kept short to conserve power while advertising)
-static uint8_t advertData[] = {
-    // Flags; this sets the device to use limited discoverable
-    // mode (advertises for 30 seconds at a time) instead of general
-    // discoverable mode (advertises indefinitely)
-    0x02, // length of this data
-    GAP_ADTYPE_FLAGS,
-    DEFAULT_DISCOVERABLE_MODE | GAP_ADTYPE_FLAGS_BREDR_NOT_SUPPORTED,
 
-    // service UUID, to notify central devices what services are included
-    // in this peripheral
-    0x03,                  // length of this data
-    GAP_ADTYPE_16BIT_MORE, // some of the UUID's, but not all
-    LO_UINT16(SIMPLEPROFILE_SERV_UUID),
-    HI_UINT16(SIMPLEPROFILE_SERV_UUID)
-};
 
 // GAP GATT Attributes
 static uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "Simple Peripheral";
@@ -150,13 +131,12 @@ static uint16_t peripheralMTU = ATT_MTU_SIZE;
  */
 static void Peripheral_ProcessTMOSMsg(tmos_event_hdr_t *pMsg);
 static void peripheralStateNotificationCB(gapRole_States_t newState, gapRoleEvent_t *pEvent);
-static void performPeriodicTask(void);
-static void simpleProfileChangeCB(uint8_t paramID, uint8_t *pValue, uint16_t len);
+
 static void peripheralParamUpdateCB(uint16_t connHandle, uint16_t connInterval,
                                     uint16_t connSlaveLatency, uint16_t connTimeout);
 static void peripheralInitConnItem(peripheralConnItem_t *peripheralConnList);
 static void peripheralRssiCB(uint16_t connHandle, int8_t rssi);
-static void peripheralChar4Notify(uint8_t *pValue, uint16_t len);
+
 
 /*********************************************************************
  * PROFILE CALLBACKS
@@ -182,10 +162,7 @@ static gapBondCBs_t Peripheral_BondMgrCBs = {
     NULL  // oob callback
 };
 
-// Simple GATT Profile Callbacks
-static simpleProfileCBs_t Peripheral_SimpleProfileCBs = {
-    simpleProfileChangeCB // Characteristic value change callback
-};
+
 /*********************************************************************
  * PUBLIC FUNCTIONS
  */
@@ -217,7 +194,6 @@ void Peripheral_Init()
         // Set the GAP Role Parameters
         GAPRole_SetParameter(GAPROLE_ADVERT_ENABLED, sizeof(uint8_t), &initial_advertising_enable);
         GAPRole_SetParameter(GAPROLE_SCAN_RSP_DATA, sizeof(scanRspData), scanRspData);
-        GAPRole_SetParameter(GAPROLE_ADVERT_DATA, sizeof(advertData), advertData);
         GAPRole_SetParameter(GAPROLE_MIN_CONN_INTERVAL, sizeof(uint16_t), &desired_min_interval);
         GAPRole_SetParameter(GAPROLE_MAX_CONN_INTERVAL, sizeof(uint16_t), &desired_max_interval);
     }
@@ -251,31 +227,15 @@ void Peripheral_Init()
     GGS_AddService(GATT_ALL_SERVICES);           // GAP
     GATTServApp_AddService(GATT_ALL_SERVICES);   // GATT attributes
     DevInfo_AddService();                        // Device Information Service
-    SimpleProfile_AddService(GATT_ALL_SERVICES); // Simple GATT Profile
 
     // Set the GAP Characteristics
     GGS_SetParameter(GGS_DEVICE_NAME_ATT, sizeof(attDeviceName), attDeviceName);
 
-    // Setup the SimpleProfile Characteristic Values
-    {
-        uint8_t charValue1[SIMPLEPROFILE_CHAR1_LEN] = {1};
-        uint8_t charValue2[SIMPLEPROFILE_CHAR2_LEN] = {2};
-        uint8_t charValue3[SIMPLEPROFILE_CHAR3_LEN] = {3};
-        uint8_t charValue4[SIMPLEPROFILE_CHAR4_LEN] = {4};
-        uint8_t charValue5[SIMPLEPROFILE_CHAR5_LEN] = {1, 2, 3, 4, 5};
-
-        SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR1, SIMPLEPROFILE_CHAR1_LEN, charValue1);
-        SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR2, SIMPLEPROFILE_CHAR2_LEN, charValue2);
-        SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR3, SIMPLEPROFILE_CHAR3_LEN, charValue3);
-        SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR4, SIMPLEPROFILE_CHAR4_LEN, charValue4);
-        SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR5, SIMPLEPROFILE_CHAR5_LEN, charValue5);
-    }
+ 
 
     // Init Connection Item
     peripheralInitConnItem(&peripheralConnList);
 
-    // Register callback with SimpleGATTprofile
-    SimpleProfile_RegisterAppCBs(&Peripheral_SimpleProfileCBs);
 
     // Register receive scan request callback
     GAPRole_BroadcasterSetCB(&Broadcaster_BroadcasterCBs);
@@ -339,17 +299,6 @@ uint16_t Peripheral_ProcessEvent(uint8_t task_id, uint16_t events)
         return (events ^ SBP_START_DEVICE_EVT);
     }
 
-    if(events & SBP_PERIODIC_EVT)
-    {
-        // Restart timer
-        if(SBP_PERIODIC_EVT_PERIOD)
-        {
-            tmos_start_task(Peripheral_TaskID, SBP_PERIODIC_EVT, SBP_PERIODIC_EVT_PERIOD);
-        }
-        // Perform periodic application task
-        performPeriodicTask();
-        return (events ^ SBP_PERIODIC_EVT);
-    }
 
     if(events & SBP_PARAM_UPDATE_EVT)
     {
@@ -479,8 +428,6 @@ static void Peripheral_LinkEstablished(gapRoleEvent_t *pEvent)
         peripheralConnList.connSlaveLatency = event->connLatency;
         peripheralConnList.connTimeout = event->connTimeout;
         peripheralMTU = ATT_MTU_SIZE;
-        // Set timer for periodic event
-        tmos_start_task(Peripheral_TaskID, SBP_PERIODIC_EVT, SBP_PERIODIC_EVT_PERIOD);
 
         // Set timer for param update event
         tmos_start_task(Peripheral_TaskID, SBP_PARAM_UPDATE_EVT, SBP_PARAM_UPDATE_DELAY);
@@ -511,7 +458,6 @@ static void Peripheral_LinkTerminated(gapRoleEvent_t *pEvent)
         peripheralConnList.connInterval = 0;
         peripheralConnList.connSlaveLatency = 0;
         peripheralConnList.connTimeout = 0;
-        tmos_stop_task(Peripheral_TaskID, SBP_PERIODIC_EVT);
         tmos_stop_task(Peripheral_TaskID, SBP_READ_RSSI_EVT);
 
         // Restart advertising
@@ -651,92 +597,6 @@ static void peripheralStateNotificationCB(gapRole_States_t newState, gapRoleEven
     }
 }
 
-/*********************************************************************
- * @fn      performPeriodicTask
- *
- * @brief   Perform a periodic application task. This function gets
- *          called every five seconds as a result of the SBP_PERIODIC_EVT
- *          TMOS event. In this example, the value of the third
- *          characteristic in the SimpleGATTProfile service is retrieved
- *          from the profile, and then copied into the value of the
- *          the fourth characteristic.
- *
- * @param   none
- *
- * @return  none
- */
-static void performPeriodicTask(void)
-{
-    uint8_t notiData[SIMPLEPROFILE_CHAR4_LEN] = {0x88};
-    peripheralChar4Notify(notiData, SIMPLEPROFILE_CHAR4_LEN);
-}
-
-/*********************************************************************
- * @fn      peripheralChar4Notify
- *
- * @brief   Prepare and send simpleProfileChar4 notification
- *
- * @param   pValue - data to notify
- *          len - length of data
- *
- * @return  none
- */
-static void peripheralChar4Notify(uint8_t *pValue, uint16_t len)
-{
-    attHandleValueNoti_t noti;
-    if(len > (peripheralMTU - 3))
-    {
-        PRINT("Too large noti\n");
-        return;
-    }
-    noti.len = len;
-    noti.pValue = GATT_bm_alloc(peripheralConnList.connHandle, ATT_HANDLE_VALUE_NOTI, noti.len, NULL, 0);
-    if(noti.pValue)
-    {
-        tmos_memcpy(noti.pValue, pValue, noti.len);
-        if(simpleProfile_Notify(peripheralConnList.connHandle, &noti) != SUCCESS)
-        {
-            GATT_bm_free((gattMsg_t *)&noti, ATT_HANDLE_VALUE_NOTI);
-        }
-    }
-}
-
-/*********************************************************************
- * @fn      simpleProfileChangeCB
- *
- * @brief   Callback from SimpleBLEProfile indicating a value change
- *
- * @param   paramID - parameter ID of the value that was changed.
- *          pValue - pointer to data that was changed
- *          len - length of data
- *
- * @return  none
- */
-static void simpleProfileChangeCB(uint8_t paramID, uint8_t *pValue, uint16_t len)
-{
-    switch(paramID)
-    {
-        case SIMPLEPROFILE_CHAR1:
-        {
-            uint8_t newValue[SIMPLEPROFILE_CHAR1_LEN];
-            tmos_memcpy(newValue, pValue, len);
-            PRINT("profile ChangeCB CHAR1.. \n");
-            break;
-        }
-
-        case SIMPLEPROFILE_CHAR3:
-        {
-            uint8_t newValue[SIMPLEPROFILE_CHAR3_LEN];
-            tmos_memcpy(newValue, pValue, len);
-            PRINT("profile ChangeCB CHAR3..\n");
-            break;
-        }
-
-        default:
-            // should not reach here!
-            break;
-    }
-}
 
 /*********************************************************************
 *********************************************************************/
