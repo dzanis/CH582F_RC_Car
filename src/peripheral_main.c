@@ -15,6 +15,7 @@
 #include "CONFIG.h"
 #include "HAL.h"
 #include "peripheral.h"
+#include "rccar_service.h"
 
 /*********************************************************************
  * GLOBAL TYPEDEFS
@@ -54,7 +55,7 @@ int main(void)
 #if(defined(DCDC_ENABLE)) && (DCDC_ENABLE == TRUE)
     PWR_DCDCCfg(ENABLE);
 #endif
-    SetSysClock(CLK_SOURCE_PLL_60MHz);
+    SetSysClock(CLK_SOURCE_PLL_32MHz);
 #if(defined(HAL_SLEEP)) && (HAL_SLEEP == TRUE)
     GPIOA_ModeCfg(GPIO_Pin_All, GPIO_ModeIN_PU);
     GPIOB_ModeCfg(GPIO_Pin_All, GPIO_ModeIN_PU);
@@ -69,6 +70,7 @@ int main(void)
     HAL_Init();
     GAPRole_PeripheralInit();
     Peripheral_Init();
+    RcCar_AddService();
     Main_Circulation();
 }
 
