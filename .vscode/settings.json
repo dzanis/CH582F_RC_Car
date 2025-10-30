@@ -1,0 +1,13 @@
+
+
+{
+    "liveServer.settings.https": {
+        // to get path to files, in VS Code right click the file
+        // select Copy Path. You need full path, not relative
+        "enable":true,
+          "cert": "C:\\Users\\zanis\\.localhost-ssl\\localhost.crt",
+        "key": "C:\\Users\\zanis\\.localhost-ssl\\localhost.key",
+        "passphrase": "2255"
+    },
+    "liveServer.settings.port": 5500 // add fixed port for your project
+}
