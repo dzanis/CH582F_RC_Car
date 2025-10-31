@@ -417,6 +417,20 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType)
     }
 }
 
+/* ------------------------------------------------------------------------
+ * DRV8833
+ * ------------------------------------------------------------------------ */
+
+// Направление движения
+#define DIR_NONE       0
+#define DIR_FORWARD    1
+#define DIR_BACKWARD   2
+
+// Повороты
+#define TURN_NONE      0
+#define TURN_RIGHT     1
+#define TURN_LEFT      2
+
 void DRV8833_Init()
 {
     // Настройка GPIO 
@@ -432,28 +446,33 @@ void DRV8833_Init()
 void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn)
 {
 
-    if (dir == 1) // вперёд
+    if (dir == DIR_FORWARD) // вперёд
     {
         PWMX_ACTOUT(CH_PWM4, speed, High_Level, ENABLE);
         PWMX_ACTOUT(CH_PWM5, 0, High_Level, ENABLE);
     }
-    else // назад
+    else if (dir == DIR_BACKWARD) // назад
     {
         PWMX_ACTOUT(CH_PWM4, 0, High_Level, ENABLE);
         PWMX_ACTOUT(CH_PWM5, speed, High_Level, ENABLE);
     }
+    else if (dir == DIR_NONE) // стоп
+    {
+        PWMX_ACTOUT(CH_PWM4, 0, High_Level, ENABLE);
+        PWMX_ACTOUT(CH_PWM5, 0, High_Level, ENABLE);
+    }
 
-    if(turn == 1) // вправо
+    if (turn == TURN_RIGHT) // вправо
     {
         GPIOA_SetBits(GPIO_Pin_14); 
         GPIOA_ResetBits(GPIO_Pin_15); 
     }
-    else if(turn == 2) // влево
+    else if (turn == TURN_LEFT) // влево
     {
         GPIOA_SetBits(GPIO_Pin_15); 
         GPIOA_ResetBits(GPIO_Pin_14); 
     }
-    else // прямо
+    else if (turn == TURN_NONE) // прямо
     {
         GPIOA_ResetBits(GPIO_Pin_14 | GPIO_Pin_15);
     }

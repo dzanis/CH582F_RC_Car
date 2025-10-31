@@ -65,6 +65,16 @@
         return (Value < Min) ? Min : (Value > Max) ? Max : Value;
       }
 
+    // Направление движения
+    const DIR_NONE     =  0
+    const DIR_FORWARD  =  1
+    const DIR_BACKWARD =  2
+
+    // Повороты
+    const TURN_NONE  =    0
+    const TURN_RIGHT =    1
+    const TURN_LEFT  =    2  
+
     // --- Send data loop ---
     function sendPacket() {
       if (!btChar) return;
@@ -73,11 +83,11 @@
       let lastY = constrain(window.lastY,-100,100);
 
       const speed = Math.round((Math.abs(lastY || 0) / 100) * 255);
-      const dir = (lastY || 0) >= 0 ? 1 : 0;
+      const dir = (lastY || 0) >= 0 ? DIR_FORWARD : DIR_BACKWARD;
 
-      let turn = 0;
-      if ((lastX || 0) < -20) turn = 1;
-      else if ((lastX || 0) > 20) turn = 2;
+      let turn = TURN_NONE;
+      if ((lastX || 0) < -20) turn = TURN_RIGHT;
+      else if ((lastX || 0) > 20) turn = TURN_LEFT;
 
       const packet = new Uint8Array([speed, dir, turn]);
       console.log(speed, dir, turn);
