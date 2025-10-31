@@ -413,6 +413,8 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType)
                 tmos_stop_task(rccarTaskID, BATT_EVT);
             }
             PRINT("Batt: connection %d removed or down\r\n", connHandle);
+            // соединение потеряно — стоп моторов
+            DRV8833_Control(0, 0, 0);
         }
     }
 }
