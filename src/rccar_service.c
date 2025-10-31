@@ -420,17 +420,13 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType)
 void DRV8833_Init()
 {
     // Настройка GPIO 
-    GPIOA_ModeCfg(GPIO_Pin_12, GPIO_ModeOut_PP_5mA); // PA12 - PWM4
-    GPIOA_ModeCfg(GPIO_Pin_13, GPIO_ModeOut_PP_5mA); // PA13 - PWM5
-    GPIOA_ModeCfg(GPIO_Pin_14 | GPIO_Pin_15, GPIO_ModeOut_PP_5mA);
+    // PA12 - PWM4   PA13 - PWM5
+    GPIOA_ModeCfg(GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14 | GPIO_Pin_15, GPIO_ModeOut_PP_5mA);
 
     // Настройка ШИМ
     PWMX_CLKCfg(6);              // такт ШИМ = Fsys / 6 = 32 MHz / 6 = 5.33 MHz
-    PWMX_CycleCfg(PWMX_Cycle_256); // период = 256 тактов  Fpwm = 5.33 MHz / 256 = ~20 kHz
+    PWMX_CycleCfg(PWMX_Cycle_255); // период = 255 тактов  Fpwm = 5.33 MHz / 255 = ~20 kHz
 
-    //Настройка каналов: 25% скважность (16 из 64)
-    PWMX_ACTOUT(CH_PWM4, 256/4, High_Level, ENABLE); // 25%
-    PWMX_ACTOUT(CH_PWM5, 256/4, High_Level, ENABLE);
 }
 
 void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn)
