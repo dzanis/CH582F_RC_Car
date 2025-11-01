@@ -15,6 +15,9 @@
 </head>
 <body>
   <h1>🚗 BLE RC Car</h1>
+  <div>
+      <span id="battery">--</span>
+  </div>
   <div id="joyDiv"></div>
   <button id="connect">🔗 Connect BLE</button>
   <p id="status">Not connected</p>
@@ -25,7 +28,7 @@
       batt: 0xFFF1,
       control: 0xFFF2,
     };
-    let joystick, btChar, timer;
+    let joystick, btChar, batteryChar, timer;
     
     // --- BLE Connect ---
     document.getElementById('connect').addEventListener('click', async () => {
@@ -36,7 +39,11 @@
         const server = await device.gatt.connect();
         const service = await server.getPrimaryService(bluetoothConfig.serviceId);
         btChar = await service.getCharacteristic(bluetoothConfig.control);
-
+        batteryChar = await service.getCharacteristic(bluetoothConfig.batt);
+         // подписка на событие "value changed"
+        batteryChar.addEventListener('characteristicvaluechanged', batteryNotification);
+        await batteryChar.startNotifications();
+        //await batteryChar.readValue(); // вызов чтение
         document.getElementById('status').textContent = '✅ Connected';
         console.log('Connected to BLE');
 
@@ -44,6 +51,7 @@
         device.addEventListener('gattserverdisconnected', () => {
           clearInterval(timer);
           document.getElementById('status').textContent = '❌ Disconnected';
+          batteryChar.removeEventListener('characteristicvaluechanged', batteryNotification);
         });
 
         // запуск опроса
@@ -93,6 +101,31 @@
       console.log(speed, dir, turn);
       btChar.writeValueWithoutResponse(packet).catch(console.error);
     }
+
+     const batteryConfig = {
+        minVoltage: 3.0,
+        maxVoltage: 4.2,
+        adcMultiplier: 3.3 / 4096,  // 0.00080566
+        batteryMultiplier: 1        // 1 без делителя, а если стоит делитель то (R1+R2)/R2
+      };
+
+    function batteryNotification(event) {
+      const value = event.target.value;
+      // читаем одно 16-битное число, little-endian
+      const adc = value.getUint16(0, /*littleEndian=*/true);
+      console.log("batteryNotification adc: ", adc);
+
+      const { adcMultiplier, batteryMultiplier, minVoltage, maxVoltage } = batteryConfig;
+      const battV = adc * adcMultiplier * batteryMultiplier;
+      const pct = Math.round(
+        Math.max(0, Math.min(100,
+          (battV - minVoltage) / (maxVoltage - minVoltage) * 100
+        ))
+      );
+      const battery = document.getElementById('battery')
+      battery.textContent = "Battery " + battV.toFixed(2) + "V / " + pct +"%";
+    }
+
 
     // --- PWA Install Support ---
       if ('serviceWorker' in navigator) {

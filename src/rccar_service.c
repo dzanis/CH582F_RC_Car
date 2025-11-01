@@ -2,7 +2,7 @@
 #include "rccar_service.h"
 
 /* Значения характеристик */
-static int16_t rccarBattValue     = 0;     // батарея
+static uint16_t rccarBattValue     = 0;     // батарея
 static uint8_t rccarControlValue [3];  //  Speed Dir Turn
 
 // Текстовое имя для характеристики  (отображается в nRF Characteristic User Description)  
@@ -47,9 +47,9 @@ static gattAttribute_t rccarAttrTbl[] =
     };
 
 /* позиции характеристик в таблице */
-#define BICYCLE_SPEED_VALUE_POS        2
-#define BICYCLE_SPEED_CCCD_POS   (BICYCLE_SPEED_VALUE_POS + 1)
-#define BICYCLE_WHEEL_CIRC_VALUE_POS   6
+#define BATT_VALUE_POS        2
+#define BATT_CCCD_POS   (BATT_VALUE_POS + 1)
+#define CONTROL_VALUE_POS   6
 
 // GAP - Advertisement data (max size = 31 bytes, though this is
 // best kept short to conserve power while advertising)
@@ -116,6 +116,9 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType);
 
 void DRV8833_Init();
 void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn);
+void  ADC_Batt_Init(void);
+uint16_t ADC_GetBatteryADC(void);
+float ADC_GetBatteryVoltage(void);
 
 bStatus_t RcCar_AddService(void)
 {
@@ -137,11 +140,12 @@ bStatus_t RcCar_AddService(void)
     linkDB_Register(rccar_HandleConnStatusCB);
 
     //findNotifyByUUID(rccarBattUUID, ATT_BT_UUID_SIZE, &myNotifyBatt);
-    InitNotify(&myNotifyBatt, &rccarAttrTbl[BICYCLE_SPEED_VALUE_POS].handle, rccarBattClientCharCfg);
+    InitNotify(&myNotifyBatt, &rccarAttrTbl[BATT_VALUE_POS].handle, rccarBattClientCharCfg);
 
     PRINT("RcCar_AddService: reg TMOS taskId=%d, gattRegSt=%d\r\n", rccarTaskID, st);  
     
     DRV8833_Init();
+    ADC_Batt_Init();
 
     return st;          
 }
@@ -259,7 +263,7 @@ void rccar_NotifySpeedCB(linkDBItem_t *pLinkItem)
             if(noti.pValue != NULL)// если нет памяти 
             {
                // формируем структуру notify
-                noti.handle = rccarAttrTbl[BICYCLE_SPEED_VALUE_POS].handle;
+                noti.handle = rccarAttrTbl[BATT_VALUE_POS].handle;
                 noti.len    = 2;
                 // записываем значение скорости
                 noti.pValue[0] = LO_UINT16(rccarBattValue);
@@ -348,6 +352,8 @@ static bStatus_t rccar_WriteAttrCB(uint16_t connHandle, gattAttribute_t *pAttr,
                     {
                         PRINT("Batt: client ENABLED notifications\r\n");
                         tmos_start_task(rccarTaskID, BATT_EVT, 1000);
+                        // сразу шлём текущее значение
+                        linkDB_PerformFunc(rccar_NotifyCB);
                     }
                     else
                     {
@@ -376,11 +382,16 @@ uint16_t rccar_ProcessEventCB(uint8_t task_id, uint16_t events)
     // Когда придёт BATT_EVT — шлём notify и перезапускаем таймер.
     if (events & BATT_EVT) 
     {  
-        rccarBattValue++;
-        // тут вызываем нотификацию  для отправки характеристики 
-        //linkDB_PerformFunc(rccar_NotifySpeedCB);
-        linkDB_PerformFunc(rccar_NotifyCB);
-
+        uint16_t adc = ADC_GetBatteryADC();    
+        if (adc != rccarBattValue) 
+        {
+            PRINT("Batt: %d mv \r\n", (uint16_t) (ADC_GetBatteryVoltage() * 1000) );
+            PRINT("Batt: %d adc\r\n", adc);
+            rccarBattValue = adc;
+            // тут вызываем нотификацию  для отправки характеристики
+            // linkDB_PerformFunc(rccar_NotifySpeedCB);
+            linkDB_PerformFunc(rccar_NotifyCB);
+        }
 
         // перезапускаем таймер на 1s
         tmos_start_task(task_id, BATT_EVT, 1000);
@@ -480,3 +491,57 @@ void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn)
     }
 
 }
+
+
+/* ------------------------------------------------------------------------
+ * ADC Batt
+ * ------------------------------------------------------------------------ */
+
+// --- Настройки ---
+#define BAT_ADC_PIN   GPIO_Pin_5 
+#define BAT_ADC_CHANNEL    1   // канал 1 = PA5
+#define ADC_SAMPLES        8   // усредняем несколько измерений
+#define ADC_VREF           3.3f
+#define ADC_RESOLUTION     4096.0f
+#define VOLTAGE_DIVIDER    1.0f  // 1 без делителя,а если стоит делитель то (R1+R2)/R2
+
+static int RoughCalib_Value = 0;
+
+// --- Инициализация ---
+void ADC_Batt_Init(void)
+{
+    PRINT("Init Battery ADC (PA5)\r\n");
+    // Настраиваем пин как вход (аналог)
+    GPIOA_ModeCfg(BAT_ADC_PIN, GPIO_ModeIN_Floating);
+    // Инициализация внешнего одноканального режима
+    // SampleFreq_3_2 ≈ 3.2M можно выбрать быстрее/медленнее
+    ADC_ExtSingleChSampInit(SampleFreq_3_2, ADC_PGA_0);
+    // Грубая калибровка
+    RoughCalib_Value = ADC_DataCalib_Rough();
+    PRINT("ADC Calib = %d\r\n", RoughCalib_Value);
+    // Выбираем канал PA5
+    ADC_ChannelCfg(BAT_ADC_CHANNEL);
+}
+
+// --- Чтение значения батареи в АЦП ---
+uint16_t ADC_GetBatteryADC(void)
+{
+    int32_t avg = 0;
+    for (uint8_t i = 0; i < ADC_SAMPLES; i++)
+    {
+        avg +=  (int32_t)ADC_ExcutSingleConver() + RoughCalib_Value;;
+    }
+    avg = avg / ADC_SAMPLES;
+    if(avg < 0) avg = 0;
+    return avg;
+}
+
+// --- Чтение значения батареи в вольтах ---
+float ADC_GetBatteryVoltage(void)
+{
+    uint16_t adc = ADC_GetBatteryADC();
+    // V = adc / 4096 * 3.3 * (R1+R2)/R2
+    float voltage = (adc / ADC_RESOLUTION) * ADC_VREF * VOLTAGE_DIVIDER;
+    return voltage;
+}
+
