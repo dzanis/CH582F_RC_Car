@@ -73,6 +73,11 @@
         return (Value < Min) ? Min : (Value > Max) ? Max : Value;
       }
 
+    function arraysEqual(a, b) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }                               
     // Направление движения
     const DIR_NONE     =  0
     const DIR_FORWARD  =  1
@@ -83,6 +88,7 @@
     const TURN_RIGHT =    1
     const TURN_LEFT  =    2  
 
+    let lastPacket = new Uint8Array([0, 0, 0]);
     // --- Send data loop ---
     function sendPacket() {
       if (!btChar) return;
@@ -98,8 +104,12 @@
       else if ((lastX || 0) > 20) turn = TURN_LEFT;
 
       const packet = new Uint8Array([speed, dir, turn]);
-      console.log(speed, dir, turn);
-      btChar.writeValueWithoutResponse(packet).catch(console.error);
+
+      if (!arraysEqual(packet, lastPacket)) {
+        console.log(speed, dir, turn);
+        lastPacket = packet;
+        btChar.writeValueWithoutResponse(packet).catch(console.error);
+      }
     }
 
      const batteryConfig = {
