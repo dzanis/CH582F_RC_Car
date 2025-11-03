@@ -1,11 +1,11 @@
 {
-  "name": "BLE Car Controller",
-  "short_name": "BLE Car",
+  "name": "BLE Car Controller on CH582F",
+  "short_name": "CH582 RC Car",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#111111",
-  "theme_color": "#0a84ff",
-  "description": "Web Bluetooth controller for RC car",
+  "background_color": "#fafafa",
+  "theme_color": "#fafafa",
+  "description": "Web Bluetooth controller for RC car on CH582F",
   "icons": [
     {
       "src": "icon-192.png",

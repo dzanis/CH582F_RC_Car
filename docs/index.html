@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>BLE RC Car Controller</title>
+  <title>CH582F RC Car</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="manifest" href="manifest.json">
   <script src="joy.js"></script>
@@ -14,14 +14,13 @@
   </style>
 </head>
 <body>
-  <h1>🚗 BLE RC Car</h1>
+  <h1>🚗 CH582F RC Car</h1>
   <div>
       <span id="battery">--</span>
   </div>
-  <div id="joyDiv"></div>
   <button id="connect">🔗 Connect BLE</button>
   <p id="status">Not connected</p>
-
+  <div id="joyDiv"></div>
   <script>
     const bluetoothConfig = {
       serviceId: 0xFFF0,

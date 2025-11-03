@@ -84,25 +84,21 @@ static uint8_t Peripheral_TaskID = INVALID_TASK_ID; // Task ID for internal task
 // GAP - SCAN RSP data (max size = 31 bytes)
 static uint8_t scanRspData[] = {
     // complete name
-    0x12, // length of this data
+    0x0E, // length of this data
     GAP_ADTYPE_LOCAL_NAME_COMPLETE,
-    'S',
-    'i',
-    'm',
-    'p',
-    'l',
-    'e',
-    ' ',
-    'P',
-    'e',
-    'r',
-    'i',
-    'p',
-    'h',
-    'e',
-    'r',
+    'C',
+    'H',
+    '5',
+    '8',
+    '2',
+    'F',
+    '_',
+    'R',
+    'C',
+    '_',
+    'C',
     'a',
-    'l',
+    'r',
     // connection interval range
     0x05, // length of this data
     GAP_ADTYPE_SLAVE_CONN_INTERVAL_RANGE,
@@ -120,7 +116,7 @@ static uint8_t scanRspData[] = {
 
 
 // GAP GATT Attributes
-static uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "Simple Peripheral";
+static uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "CH582F_RC_Car";
 
 // Connection item list
 static peripheralConnItem_t peripheralConnList;
