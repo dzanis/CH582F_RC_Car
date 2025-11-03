@@ -75,7 +75,7 @@ typedef struct {
 } CharacteristicNotify_t;
 
 CharacteristicNotify_t myNotifyBatt ;
-
+static uint8_t battNotifyEnabled = 0;
 void InitNotify(CharacteristicNotify_t *notify, uint16_t *handle, gattCharCfg_t *clientCharCfg);
 void findNotifyByUUID(const uint8_t *uuid, uint8_t uuid_len, CharacteristicNotify_t *notify);
 
@@ -102,9 +102,15 @@ static gattServiceCBs_t rccarCBs =
 /* ------------------------------------------------------------------------ */
 /* TMOS  */
 /* ------------------------------------------------------------------------ */
-#define BATT_EVT   0x0001   // событие для нотификации batt
+#define PERIODIC_EVENT   0x0001   // периодическое событие 
+#define PERIODIC_EVENT_TIME   MS1_TO_SYSTEM_TIME(1000)   // 1 секунда
 static uint8_t rccarTaskID = INVALID_TASK_ID;;       // ID задачи tmos
 uint16_t rccar_ProcessEventCB(uint8_t task_id, uint16_t events);
+
+// Настройки для таймаута бездействия
+#define IDLE_SLEEP_TIMEOUT_S   60   // через 60 секунд (1 минута) усыпить драйвер
+#define IDLE_SHUTDOWN_TIMEOUT_S 60 * 10  // 10 минут выключить чип
+static uint16_t idleCounter = 0;
 
 // Метод вызывается если изменился статус соединения
 static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType);
@@ -116,6 +122,7 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType);
 
 void DRV8833_Init();
 void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn);
+void DRV8833_Sleep(FunctionalState state);
 void  ADC_Batt_Init(void);
 uint16_t ADC_GetBatteryADC(void);
 float ADC_GetBatteryVoltage(void);
@@ -146,7 +153,7 @@ bStatus_t RcCar_AddService(void)
     
     DRV8833_Init();
     ADC_Batt_Init();
-
+    tmos_start_task(rccarTaskID, PERIODIC_EVENT, PERIODIC_EVENT_TIME); // запускаем периодическое событие    
     return st;          
 }
 
@@ -351,14 +358,14 @@ static bStatus_t rccar_WriteAttrCB(uint16_t connHandle, gattAttribute_t *pAttr,
                     if (charCfg & GATT_CLIENT_CFG_NOTIFY) // client ENABLED notifications
                     {
                         PRINT("Batt: client ENABLED notifications\r\n");
-                        tmos_start_task(rccarTaskID, BATT_EVT, 1000);
+                        battNotifyEnabled = 1;
                         // сразу шлём текущее значение
                         linkDB_PerformFunc(rccar_NotifyCB);
                     }
                     else
                     {
                         PRINT("Batt: client DISABLED notifications\r\n");
-                        tmos_stop_task(rccarTaskID, BATT_EVT);
+                        battNotifyEnabled = 0;
                     }
                 }
             }
@@ -379,25 +386,41 @@ static bStatus_t rccar_WriteAttrCB(uint16_t connHandle, gattAttribute_t *pAttr,
 */
 uint16_t rccar_ProcessEventCB(uint8_t task_id, uint16_t events)
 {
-    // Когда придёт BATT_EVT — шлём notify и перезапускаем таймер.
-    if (events & BATT_EVT) 
-    {  
-        uint16_t adc = ADC_GetBatteryADC();    
-        if (adc != rccarBattValue) 
+    // Когда придёт PERIODIC_EVENT — делаем проверки и перезапускаем таймер.
+    if (events & PERIODIC_EVENT)
+    {
+        if (battNotifyEnabled)
         {
-            PRINT("Batt: %d mv \r\n", (uint16_t) (ADC_GetBatteryVoltage() * 1000) );
-            PRINT("Batt: %d adc\r\n", adc);
-            rccarBattValue = adc;
-            // тут вызываем нотификацию  для отправки характеристики
-            // linkDB_PerformFunc(rccar_NotifySpeedCB);
-            linkDB_PerformFunc(rccar_NotifyCB);
+            uint16_t adc = ADC_GetBatteryADC();
+            if (adc != rccarBattValue)
+            {
+                PRINT("Batt: %d mv \r\n", (uint16_t)(ADC_GetBatteryVoltage() * 1000));
+                PRINT("Batt: %d adc\r\n", adc);
+                rccarBattValue = adc;
+                // тут вызываем нотификацию  для отправки характеристики
+                // linkDB_PerformFunc(rccar_NotifySpeedCB);
+                linkDB_PerformFunc(rccar_NotifyCB);
+            }
         }
 
-        // перезапускаем таймер на 1s
-        tmos_start_task(task_id, BATT_EVT, 1000);
+        idleCounter++;
 
-        // пометим событие как обработанное 
-        return (events ^ BATT_EVT);
+        if (idleCounter == IDLE_SHUTDOWN_TIMEOUT_S) 
+        {
+            PRINT("Entering shutdown...\r\n");
+            DelayMs(1000);
+            LowPower_Shutdown(0); // полностью выключить питание
+        }
+        else
+        if (idleCounter == IDLE_SLEEP_TIMEOUT_S) 
+        {                        
+            PRINT("Idle timeout\r\n");
+            DRV8833_Sleep(ENABLE); // усыпляем драйвер
+        }
+
+        // перезапускаем таймер
+        tmos_start_task(task_id, PERIODIC_EVENT, PERIODIC_EVENT_TIME);
+        return (events ^ PERIODIC_EVENT);
     }
 
     return 0;
@@ -421,11 +444,18 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType)
             if (rccarTaskID != INVALID_TASK_ID)
             {
                 PRINT("Batt: DISABLE notifications\r\n");
-                tmos_stop_task(rccarTaskID, BATT_EVT);
+                battNotifyEnabled = 0;
             }
-            PRINT("Batt: connection %d removed or down\r\n", connHandle);
+            PRINT("BLE disconnected: %d\r\n", connHandle);
             // соединение потеряно — стоп моторов
             DRV8833_Control(0, 0, 0);
+            DRV8833_Sleep(ENABLE);   // усыпляем драйвер
+        }
+        else if (changeType == LINKDB_STATUS_UPDATE_NEW)
+        {
+            // соединение установлено
+            PRINT("BLE connected: %d\r\n", connHandle);
+            DRV8833_Sleep(DISABLE); // пробуждаем драйвер
         }
     }
 }
@@ -447,17 +477,26 @@ static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType)
 void DRV8833_Init()
 {
     // Настройка GPIO 
+    // PA5  - EEP
+    // PA12 - IN1   PA13 - IN2
+    // PA14 - IN3   PA15 - IN4
+
     // PA12 - PWM4   PA13 - PWM5
-    GPIOA_ModeCfg(GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14 | GPIO_Pin_15, GPIO_ModeOut_PP_5mA);
+    GPIOA_ModeCfg(GPIO_Pin_5 | GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14 | GPIO_Pin_15, GPIO_ModeOut_PP_5mA);
 
     // Настройка ШИМ
     PWMX_CLKCfg(6);              // такт ШИМ = Fsys / 6 = 32 MHz / 6 = 5.33 MHz
     PWMX_CycleCfg(PWMX_Cycle_255); // период = 255 тактов  Fpwm = 5.33 MHz / 255 = ~20 kHz
-
 }
 
 void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn)
 {
+    if(idleCounter > IDLE_SLEEP_TIMEOUT_S) // если был в спящем режиме
+    {
+        DRV8833_Sleep(DISABLE);
+    }
+
+    idleCounter = 0; // сбрасываем счётчик бездействия
 
     if (dir == DIR_FORWARD) // вперёд
     {
@@ -492,14 +531,29 @@ void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn)
 
 }
 
+// --- DRV8833 Sleep/Wake ---
+void DRV8833_Sleep(FunctionalState state)
+{
+    if (state == ENABLE)
+    {
+        GPIOA_ResetBits(GPIO_Pin_5);
+        PRINT("DRV8833: SLEEP\r\n");
+    }
+    else
+    {
+        GPIOA_SetBits( GPIO_Pin_5);
+        PRINT("DRV8833: WAKE\r\n");
+    }
+}
+
 
 /* ------------------------------------------------------------------------
  * ADC Batt
  * ------------------------------------------------------------------------ */
 
 // --- Настройки ---
-#define BAT_ADC_PIN   GPIO_Pin_5 
-#define BAT_ADC_CHANNEL    1   // канал 1 = PA5
+#define BAT_ADC_PIN   GPIO_Pin_4 
+#define BAT_ADC_CHANNEL    0   // канал 1 = PA5
 #define ADC_SAMPLES        8   // усредняем несколько измерений
 #define ADC_VREF           3.3f
 #define ADC_RESOLUTION     4096.0f
