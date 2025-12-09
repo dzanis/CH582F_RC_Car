@@ -1,5 +1,6 @@
 #include "CONFIG.h"
 #include "rccar_service.h"
+#include "autooff.h"
 
 /* Значения характеристик */
 static uint16_t rccarBattValue     = 0;     // батарея
@@ -106,11 +107,6 @@ static gattServiceCBs_t rccarCBs =
 #define PERIODIC_EVENT_TIME   MS1_TO_SYSTEM_TIME(1000)   // 1 секунда
 static uint8_t rccarTaskID = INVALID_TASK_ID;;       // ID задачи tmos
 uint16_t rccar_ProcessEventCB(uint8_t task_id, uint16_t events);
-
-// Настройки для таймаута бездействия
-#define IDLE_SLEEP_TIMEOUT_S   60   // через 60 секунд (1 минута) усыпить драйвер
-#define IDLE_SHUTDOWN_TIMEOUT_S 60 * 10  // 10 минут выключить чип
-static uint16_t idleCounter = 0;
 
 // Метод вызывается если изменился статус соединения
 static void rccar_HandleConnStatusCB(uint16_t connHandle, uint8_t changeType);
@@ -402,22 +398,6 @@ uint16_t rccar_ProcessEventCB(uint8_t task_id, uint16_t events)
                 linkDB_PerformFunc(rccar_NotifyCB);
             }
         }
-
-        idleCounter++;
-
-        if (idleCounter == IDLE_SHUTDOWN_TIMEOUT_S) 
-        {
-            PRINT("Entering shutdown...\r\n");
-            DelayMs(1000);
-            LowPower_Shutdown(0); // полностью выключить питание
-        }
-        else
-        if (idleCounter == IDLE_SLEEP_TIMEOUT_S) 
-        {                        
-            PRINT("Idle timeout\r\n");
-            DRV8833_Sleep(ENABLE); // усыпляем драйвер
-        }
-
         // перезапускаем таймер
         tmos_start_task(task_id, PERIODIC_EVENT, PERIODIC_EVENT_TIME);
         return (events ^ PERIODIC_EVENT);
@@ -487,16 +467,13 @@ void DRV8833_Init()
     // Настройка ШИМ
     PWMX_CLKCfg(6);              // такт ШИМ = Fsys / 6 = 32 MHz / 6 = 5.33 MHz
     PWMX_CycleCfg(PWMX_Cycle_255); // период = 255 тактов  Fpwm = 5.33 MHz / 255 = ~20 kHz
+
+    AutoOff_Init(); // инициализация авто-офф модуля
 }
 
 void DRV8833_Control(uint8_t speed, uint8_t dir, uint8_t turn)
 {
-    if(idleCounter > IDLE_SLEEP_TIMEOUT_S) // если был в спящем режиме
-    {
-        DRV8833_Sleep(DISABLE);
-    }
-
-    idleCounter = 0; // сбрасываем счётчик бездействия
+    AutoOff_NotifyActivity(); // сообщаем что было действие
 
     if (dir == DIR_FORWARD) // вперёд
     {
