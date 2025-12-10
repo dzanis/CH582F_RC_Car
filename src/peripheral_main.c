@@ -16,6 +16,7 @@
 #include "HAL.h"
 #include "peripheral.h"
 #include "rccar_service.h"
+#include "drv8833.h"
 
 /*********************************************************************
  * GLOBAL TYPEDEFS
@@ -70,6 +71,7 @@ int main(void)
     HAL_Init();
     GAPRole_PeripheralInit();
     Peripheral_Init();
+    DRV8833_Init();
     RcCar_AddService();
     Main_Circulation();
 }
