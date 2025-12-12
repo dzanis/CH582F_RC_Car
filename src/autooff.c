@@ -24,6 +24,8 @@ static uint16_t AutoOff_ProcessEvent(uint8_t task_id, uint16_t events)
         if (idleCounter == IDLE_SHUTDOWN_TIMEOUT_S) 
         {
             PRINT("Entering shutdown...\r\n");
+            GPIOA_ModeCfg(GPIO_Pin_All, GPIO_ModeIN_PU);
+            GPIOB_ModeCfg(GPIO_Pin_All, GPIO_ModeIN_PU);
             DelayMs(1000);
             LowPower_Shutdown(0); // полностью выключить питание
         }
