@@ -17,6 +17,7 @@
 #include "peripheral.h"
 #include "rccar_service.h"
 #include "drv8833.h"
+#include "gamepad.h"
 
 /*********************************************************************
  * GLOBAL TYPEDEFS
@@ -73,6 +74,7 @@ int main(void)
     Peripheral_Init();
     DRV8833_Init();
     RcCar_AddService();
+    gamepad_init();
     Main_Circulation();
 }
 
